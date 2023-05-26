@@ -152,8 +152,10 @@ let b:undo_ftplugin .= ' | setlocal matchpairs<'
 " returns are byte offsets in the current line.  The code below should run
 " under Python 3, but it won't match up the holes correctly if you have
 " Unicode characters.
+"
+" ProgMiner: I think I've fixed it but maybe not in all cases
 function! s:UsingPython2()
-  return 1
+  return 0
   "if has('python')
   "  return 1
   "endif
@@ -164,7 +166,7 @@ let s:using_python2 = s:UsingPython2()
 let s:python_cmd = s:using_python2 ? 'py ' : 'py3 '
 let s:python_loadfile = s:using_python2 ? 'pyfile ' : 'py3file '
 
-if has('python') " || has('python3')
+if has('python') || has('python3')
 
 function! s:LogAgda(name, text, append)
     let agdawinnr = bufwinnr('__Agda__')

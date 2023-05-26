@@ -8,11 +8,11 @@ def vim_func(vim_fname_or_func=None, conv=None):
     '''Expose a python function to vim, optionally overriding its name.'''
 
     def wrap_func(func, vim_fname, conv):
-        fname = func.func_name
+        fname = func.__name__
         vim_fname = vim_fname or fname
 
-        arg_names = func.func_code.co_varnames[:func.func_code.co_argcount]
-        arg_defaults = dict(zip(arg_names[:-len(func.func_defaults or ()):], func.func_defaults or []))
+        arg_names = func.__code__.co_varnames[:func.__code__.co_argcount]
+        arg_defaults = dict(list(zip(arg_names[:-len(func.__defaults__ or ()):], func.__defaults__ or [])))
 
         @wraps(func)
         def from_vim(vim_arg_dict):
@@ -33,13 +33,14 @@ def vim_func(vim_fname_or_func=None, conv=None):
 
         vim.command('''
             function! {vim_fname}({vim_params})
-                py {fname}.from_vim(vim.eval(\'a:\'))
+                py3 {fname}.from_vim(vim.eval(\'a:\'))
             endfunction
         '''.format(
             vim_fname=vim_fname,
             vim_params=', '.join(arg_names),
             fname=fname,
         ))
+
         return func
 
     if callable(vim_fname_or_func):
@@ -62,7 +63,13 @@ def vim_bool(s):
 
 # start Agda
 # TODO: I'm pretty sure this will start an agda process per buffer which is less than desirable...
-agda = subprocess.Popen(["agda", "--interaction"], bufsize = 1, stdin = subprocess.PIPE, stdout = subprocess.PIPE, universal_newlines = True)
+agda = subprocess.Popen(
+    ["agda", "--interaction"],
+    bufsize = 1,
+    stdin = subprocess.PIPE,
+    stdout = subprocess.PIPE,
+    universal_newlines = True,
+)
 
 goals = {}
 annotations = []
@@ -70,6 +77,14 @@ annotations = []
 agdaVersion = [0,0,0,0]
 
 rewriteMode = "Normalised"
+
+def getVimCursorPos():
+    row, col = vim.current.window.cursor
+    line = vim.current.line.encode()
+
+    col = len(line[:col].decode())
+
+    return (row, col)
 
 # This technically needs to turn a string into a Haskell escaped string, buuuut just gonna cheat.
 def escape(s):
@@ -95,7 +110,13 @@ def promptUser(msg):
 
 def AgdaRestart():
     global agda
-    agda = subprocess.Popen(["agda", "--interaction"], bufsize = 1, stdin = subprocess.PIPE, stdout = subprocess.PIPE, universal_newlines = True)
+    agda = subprocess.Popen(
+        ["agda", "--interaction"],
+        bufsize = 1,
+        stdin = subprocess.PIPE,
+        stdout = subprocess.PIPE,
+        universal_newlines = True,
+    )
 
 def findGoals(goalList):
     global goals
@@ -120,8 +141,9 @@ def findGoals(goalList):
                 start = min(hstart, qstart)
             if start != -1:
                 start = start + 1
+                vimStart = len(line[:start].encode())
 
-                if vim.eval('synID("%d", "%d", 0)' % (row, start)) == agdaHolehlID:
+                if vim.eval('synID("%d", "%d", 0)' % (row, vimStart)) == agdaHolehlID:
                     goals[goalList.pop(0)] = (row, start)
             if len(goalList) == 0: break
         if len(goalList) == 0: break
@@ -131,9 +153,11 @@ def findGoals(goalList):
 
 def findGoal(row, col):
     global goals
-    for item in goals.items():
-        if item[1][0] == row and item[1][1] == col:
-            return item[0]
+
+    for goal, (r, c) in goals.items():
+        if r == row and c == col:
+            return goal
+
     return None
 
 def getOutput():
@@ -210,7 +234,7 @@ def interpretResponse(responses, quiet = False):
         elif "(agda2-make-case-action-extendlam '" in response:
             response = response.replace("?", "{!   !}") # this probably isn't safe
             cases = re.findall(r'"((?:[^"\\]|\\.)*)"', response[response.index("agda2-make-case-action-extendlam '")+34:])
-            col = vim.current.window.cursor[1]
+            col = getVimCursorPos()[1]
             line = vim.current.line
 
             # TODO: The following logic is far from perfect.
@@ -247,7 +271,7 @@ def interpretResponse(responses, quiet = False):
         elif "(agda2-make-case-action '" in response:
             response = response.replace("?", "{!   !}") # this probably isn't safe
             cases = re.findall(r'"((?:[^"\\]|\\.)*)"', response[response.index("agda2-make-case-action '")+24:])
-            row = vim.current.window.cursor[0]
+            row = getVimCursorPos()[0]
             prefix = re.match(r'[ \t]*', vim.current.line).group()
             vim.current.buffer[row-1:row] = [prefix + case for case in cases]
             f = vim.current.buffer.name
@@ -279,11 +303,11 @@ def sendCommandLoad(file, quiet):
     if agdaVersion < [2,5,0,0]: # in 2.5 they changed it so Cmd_load takes commandline arguments
         incpaths_str = ",".join(vim.vars['agdavim_agda_includepathlist'])
     else:
-        incpaths_str = "\"-i\"," + ",\"-i\",".join(vim.vars['agdavim_agda_includepathlist'])
+        incpaths_str = "\"-i\"," + ",\"-i\",".join([x.decode() for x in vim.vars['agdavim_agda_includepathlist']])
     sendCommand('Cmd_load "%s" [%s]' % (escape(file), incpaths_str), quiet = quiet)
 
 #def getIdentifierAtCursor():
-#    (r, c) = vim.current.window.cursor
+#    (r, c) = getVimCursorPos()
 #    line = vim.current.line
 #    try:
 #        start = re.search(r"[^\s@(){};]+$", line[:c+1]).start()
@@ -294,7 +318,7 @@ def sendCommandLoad(file, quiet):
 
 def replaceHole(replacement):
     rep = replacement.replace('\n', ' ').replace('    ', ';') # TODO: This probably needs to be handled better
-    (r, c) = vim.current.window.cursor
+    (r, c) = getVimCursorPos()
     line = vim.current.line
     if line[c] == "?":
         start = c
@@ -310,7 +334,7 @@ def replaceHole(replacement):
     vim.current.line = line[:start] + rep + line[end:]
 
 def getHoleBodyAtCursor():
-    (r, c) = vim.current.window.cursor
+    (r, c) = getVimCursorPos()
     line = vim.current.line
     try:
         if line[c] == "?":
